@@ -71,7 +71,9 @@ type containerJSON struct {
 	Ports           []portJSON
 	Labels          map[string]string `json:"Labels"`
 	NetworkSettings struct {
-		Networks map[string]struct{} `json:"Networks"`
+		Networks map[string]struct {
+			IPAddress string `json:"IPAddress"`
+		} `json:"Networks"`
 	} `json:"NetworkSettings"`
 }
 
@@ -132,12 +134,28 @@ func (c *DockerClient) ListContainers(ctx context.Context) ([]Service, error) {
 			}
 		}
 		sort.Ints(svc.Ports)
+		netNames := make([]string, 0, len(ct.NetworkSettings.Networks))
 		for netName := range ct.NetworkSettings.Networks {
+			netNames = append(netNames, netName)
+		}
+		sort.Strings(netNames)
+		for _, netName := range netNames {
 			if !defaultNetworks[netName] {
 				svc.Networks = append(svc.Networks, netName)
+				if svc.IP == "" {
+					svc.IP = ct.NetworkSettings.Networks[netName].IPAddress
+				}
 			}
 		}
-		sort.Strings(svc.Networks)
+		if svc.IP == "" {
+			// No user-defined network: fall back to bridge & co.
+			for _, netName := range netNames {
+				if ip := ct.NetworkSettings.Networks[netName].IPAddress; ip != "" {
+					svc.IP = ip
+					break
+				}
+			}
+		}
 		services = append(services, svc)
 	}
 	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strconv"
 	"testing"
 
@@ -111,5 +112,57 @@ func TestAIEnrichLeavesUnknownAlone(t *testing.T) {
 	aiEnrich(context.Background(), p, cat, stub, &out)
 	if len(p.Unmatched) != 1 || len(p.Matches) != 0 {
 		t.Fatalf("unknown service should stay unmatched: %+v", p.Matches)
+	}
+}
+
+func TestProbeTargets(t *testing.T) {
+	tests := []struct {
+		name string
+		svc  discover.Service
+		goos string
+		want []probeTarget
+	}{
+		{
+			name: "published port via localhost on any platform",
+			svc:  discover.Service{Ports: []int{8080}, Published: map[int]int{8080: 18080}},
+			goos: "darwin",
+			want: []probeTarget{{"http://127.0.0.1:18080/metrics", 8080}},
+		},
+		{
+			name: "network-only container via container IP on linux",
+			svc:  discover.Service{Ports: []int{8080}, IP: "172.20.0.5"},
+			goos: "linux",
+			want: []probeTarget{{"http://172.20.0.5:8080/metrics", 8080}},
+		},
+		{
+			name: "network-only container unreachable off linux",
+			svc:  discover.Service{Ports: []int{8080}, IP: "172.20.0.5"},
+			goos: "darwin",
+			want: nil,
+		},
+		{
+			name: "published preferred, unpublished falls back to IP",
+			svc: discover.Service{Ports: []int{8080, 9100}, IP: "172.20.0.5",
+				Published: map[int]int{8080: 18080}},
+			goos: "linux",
+			want: []probeTarget{
+				{"http://127.0.0.1:18080/metrics", 8080},
+				{"http://172.20.0.5:9100/metrics", 9100},
+			},
+		},
+		{
+			name: "no ip and nothing published",
+			svc:  discover.Service{Ports: []int{8080}},
+			goos: "linux",
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := probeTargets(tt.svc, tt.goos)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("probeTargets() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

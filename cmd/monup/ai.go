@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sort"
+	"runtime"
 
 	"github.com/YusufDrymz/monup/internal/ai"
 	"github.com/YusufDrymz/monup/internal/catalog"
@@ -57,32 +57,48 @@ func aiEnrich(ctx context.Context, p *plan.Plan, cat *catalog.Catalog, client ai
 	p.Unmatched = still
 }
 
-// tryGenerate probes the container's published ports for a /metrics
+// probeTarget is one candidate /metrics endpoint of a container: the URL
+// to probe from the host and the service-side port the recipe targets.
+type probeTarget struct {
+	url  string
+	port int
+}
+
+// probeTargets lists candidate endpoints: published ports via localhost
+// everywhere; on linux also unpublished ports via the container IP,
+// which the host can reach directly (network-only containers).
+func probeTargets(svc discover.Service, goos string) []probeTarget {
+	var targets []probeTarget
+	for _, port := range svc.Ports {
+		switch pub, ok := svc.Published[port]; {
+		case ok:
+			targets = append(targets, probeTarget{fmt.Sprintf("http://127.0.0.1:%d/metrics", pub), port})
+		case goos == "linux" && svc.IP != "":
+			targets = append(targets, probeTarget{fmt.Sprintf("http://%s:%d/metrics", svc.IP, port), port})
+		}
+	}
+	return targets
+}
+
+// tryGenerate probes the container's reachable ports for a /metrics
 // endpoint and, on success, has the model generate a recipe for it.
 func tryGenerate(ctx context.Context, p *plan.Plan, client ai.Client, svc discover.Service,
 	uniqueInstance func(string, discover.Service) string, out io.Writer) (plan.Match, bool) {
 
-	ports := make([]int, 0, len(svc.Published))
-	for private := range svc.Published {
-		ports = append(ports, private)
-	}
-	sort.Ints(ports)
-
-	for _, private := range ports {
-		url := fmt.Sprintf("http://127.0.0.1:%d/metrics", svc.Published[private])
-		metrics, err := discover.ProbeMetrics(ctx, url)
+	for _, pt := range probeTargets(svc, runtime.GOOS) {
+		metrics, err := discover.ProbeMetrics(ctx, pt.url)
 		if err != nil {
 			continue
 		}
 		fmt.Fprintf(out, "ai: %s exposes %d metrics on :%d, generating dashboard and alerts (%s) ...\n",
-			svc.Name, len(metrics), private, client.Name())
+			svc.Name, len(metrics), pt.port, client.Name())
 		name := uniqueInstance(plan.Slug(svc.Name), svc)
-		entry, err := ai.GenerateEntry(ctx, client, name, private, "/metrics", metrics)
+		entry, err := ai.GenerateEntry(ctx, client, name, pt.port, "/metrics", metrics)
 		if err != nil {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("ai: %s: %v", svc.Name, err))
 			return plan.Match{}, false
 		}
-		m, warn, ok := plan.Bind(svc, entry, private, "ai-metrics")
+		m, warn, ok := plan.Bind(svc, entry, pt.port, "ai-metrics")
 		if !ok {
 			p.Warnings = append(p.Warnings, "ai: "+warn)
 			return plan.Match{}, false
