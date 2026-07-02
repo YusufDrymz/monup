@@ -222,6 +222,10 @@ func cmdPlan(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
+	if err := render.CheckRules(files); err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
 	p.Print(stdout, render.Paths(files), colorEnabled())
 	fmt.Fprintln(stdout, `Run "monup apply" to write these files, "monup apply --start" to also start the stack.`)
 	return 0
@@ -249,6 +253,10 @@ func cmdApply(args []string, stdout, stderr io.Writer) int {
 	}
 	files, err := render.Files(p)
 	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	if err := render.CheckRules(files); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}

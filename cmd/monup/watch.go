@@ -71,6 +71,10 @@ func watchLoop(ctx context.Context, cf *commonFlags, interval time.Duration,
 	color := colorEnabled()
 
 	apply := func(files map[string][]byte) {
+		if err := render.CheckRules(files); err != nil {
+			fmt.Fprintf(stderr, "%s apply skipped: %v\n", stamp(), err)
+			return
+		}
 		if err := writeFiles(out, files, stdout); err != nil {
 			fmt.Fprintf(stderr, "%s apply failed: %v\n", stamp(), err)
 			return
