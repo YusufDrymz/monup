@@ -139,6 +139,35 @@ monup apply
 
 Renkli çıktıyı kapatmak için `NO_COLOR=1`.
 
+## AI destekli keşif (`--ai`)
+
+`monup plan --ai` (ya da `apply --ai`), kataloğun tanımadığı container'ları
+yükseltir:
+
+1. **Custom `/metrics` endpoint'leri** — bilinmeyen bir container publish
+   edilmiş bir portta Prometheus metriği sunuyorsa, monup metrik adlarını
+   okur ve bir LLM'e ona özel Grafana dashboard'u ile alert kuralları
+   ürettirir. Çıktı kullanılmadan önce doğrulanır: biçimi geçerli olmalı
+   ve yalnızca gerçekten var olan metriklere referans verebilir — aksi
+   reddedilir (doğrulama hatasıyla bir kez yeniden denenir, sonra vazgeçilir).
+2. **Sınıflandırma** — metriği olmayan container'lar bilinen servis
+   tipleriyle karşılaştırılır (örneğin fingerprint'lerin kaçırdığı custom
+   build bir postgres imajı). Yalnızca yüksek güvenli cevaplar kabul
+   edilir; modele yalnızca container metadata'sı gider, env değerleri ve
+   komut satırları asla gönderilmez.
+
+AI planı asla bozmaz — yalnızca üstüne ekler ve araç API key'siz de tam
+çalışır. Provider ortam değişkenleriyle seçilir:
+
+```
+ANTHROPIC_API_KEY=...          # Anthropic (varsayılan model claude-opus-4-8)
+OPENAI_API_KEY=...             # OpenAI   (varsayılan model gpt-4o-mini)
+OLLAMA_HOST=localhost:11434    # Ollama   (varsayılan model llama3.1, tamamen lokal)
+
+MONUP_AI_PROVIDER=anthropic|openai|ollama   # açık seçim
+MONUP_AI_MODEL=<model-id>                   # model override
+```
+
 ## Sorun giderme
 
 - **"no docker socket found"** — Docker çalışmıyor ya da socket alışılmadık

@@ -63,6 +63,11 @@ from `.env.example`, fill it in and restart the affected exporter.
   monup tells you instead of generating a config that can't connect.
 - **Output**: everything lands in `./monup/` as plain files. Re-running
   `apply` is idempotent and reports created/updated/unchanged per file.
+- **AI (optional)**: `--ai` handles what the catalog can't — it classifies
+  unknown containers and, when one serves custom Prometheus metrics,
+  generates a dashboard and alert rules for it (Anthropic, OpenAI or a
+  local Ollama). Output is validated before it touches your config, and
+  monup stays fully functional without any API key.
 
 ## Docs
 

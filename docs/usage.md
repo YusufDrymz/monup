@@ -142,6 +142,35 @@ monup apply
 
 `NO_COLOR=1` disables colored output.
 
+## AI-assisted discovery (`--ai`)
+
+`monup plan --ai` (or `apply --ai`) upgrades the containers the catalog
+doesn't recognize:
+
+1. **Custom `/metrics` endpoints** — if an unknown container serves
+   Prometheus metrics on a published port, monup reads the metric names
+   and has an LLM generate a tailored Grafana dashboard and alert rules
+   for it. The output is validated before use: it must be well-formed and
+   may only reference metrics that actually exist — anything else is
+   rejected (one retry with the validation error, then give up).
+2. **Classification** — containers without metrics are checked against
+   the known service types (a custom-built postgres image the
+   fingerprints miss, for example). Only high-confidence answers are
+   accepted; only container metadata is sent, never env values or
+   command lines.
+
+AI never degrades the plan — it only adds to it, and everything still
+works without any API key. Configure a provider via environment:
+
+```
+ANTHROPIC_API_KEY=...          # Anthropic (default model claude-opus-4-8)
+OPENAI_API_KEY=...             # OpenAI   (default model gpt-4o-mini)
+OLLAMA_HOST=localhost:11434    # Ollama   (default model llama3.1, fully local)
+
+MONUP_AI_PROVIDER=anthropic|openai|ollama   # explicit choice
+MONUP_AI_MODEL=<model-id>                   # model override
+```
+
 ## Troubleshooting
 
 - **"no docker socket found"** — Docker isn't running, or the socket is
