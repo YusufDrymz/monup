@@ -70,6 +70,10 @@ Re-running `apply` is idempotent: each file is reported as
 configuration — edit them, commit them to git, or use them as a starting
 point and drop monup entirely.
 
+If `promtool` is on PATH, `plan` and `apply` additionally run
+`promtool check rules` over the generated rule files and refuse to
+continue on failure; without promtool the check is skipped.
+
 ### 3. Credentials
 
 Secrets are never written into the generated files; they stay as `${VAR}`
@@ -94,6 +98,34 @@ Grafana: `http://localhost:3000` (admin/admin unless you set
 `MONUP_GRAFANA_ADMIN_USER` / `MONUP_GRAFANA_ADMIN_PASSWORD` in `.env`).
 Dashboards are in the **monup** folder. Prometheus: `http://localhost:9090`
 (targets under Status → Targets, alert rules under Alerts).
+
+### 5. Keep it in sync
+
+Containers come and go, and generated files get edited. Two commands keep
+things honest:
+
+```console
+$ monup diff
+```
+
+compares the output directory against the current plan: every file is
+reported as create, update or stale (still on disk but no longer
+generated), with a unified diff for updates. Hand edits show up the same
+way, so this doubles as drift detection. Exit codes follow `diff(1)`:
+0 no differences, 1 differences found, 2 error — usable in scripts and
+cron.
+
+```console
+$ monup watch --auto-apply
+```
+
+polls Docker (default every 30s, `--interval`) and prints a plan delta
+whenever containers appear or disappear, followed by the file changes.
+With `--auto-apply` the output directory is rewritten on each change;
+without it watch only reports. Stop with ctrl-c. A running stack picks up
+the new files only after `docker compose up -d` in the output directory.
+`watch` does not take `--ai` — run `plan --ai` by hand when a new unknown
+service shows up.
 
 ## How exporters reach your services
 
@@ -129,15 +161,21 @@ Service notes:
 ## Flags
 
 ```
-monup plan|apply
+monup plan|apply|diff|watch
   --docker-socket path   docker socket (default: auto-detect, incl. $DOCKER_HOST)
   --only a,b             only these catalog entries
   --exclude a,b          skip these catalog entries
   --no-host-scan         skip host TCP listener scan (linux only)
 
-monup apply
+monup apply|diff|watch
   --out dir              output directory (default "monup")
+
+monup apply
   --start                run `docker compose up -d` after writing
+
+monup watch
+  --interval dur         poll interval (default 30s)
+  --auto-apply           write files whenever the plan changes
 ```
 
 `NO_COLOR=1` disables colored output.
@@ -148,11 +186,13 @@ monup apply
 doesn't recognize:
 
 1. **Custom `/metrics` endpoints** — if an unknown container serves
-   Prometheus metrics on a published port, monup reads the metric names
-   and has an LLM generate a tailored Grafana dashboard and alert rules
-   for it. The output is validated before use: it must be well-formed and
-   may only reference metrics that actually exist — anything else is
-   rejected (one retry with the validation error, then give up).
+   Prometheus metrics on a published port (on Linux, network-only
+   containers are also probed through their container IP), monup reads
+   the metric names and has an LLM generate a tailored Grafana dashboard
+   and alert rules for it. The output is validated before use: it must be
+   well-formed and may only reference metrics that actually exist —
+   anything else is rejected (one retry with the validation error, then
+   give up).
 2. **Classification** — containers without metrics are checked against
    the known service types (a custom-built postgres image the
    fingerprints miss, for example). Only high-confidence answers are

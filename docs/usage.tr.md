@@ -70,6 +70,10 @@ olarak raporlanır. Üretilenler düz Prometheus/Grafana konfigürasyonudur —
 düzenleyebilir, git'e commit'leyebilir ya da başlangıç noktası olarak alıp
 monup'ı tamamen bırakabilirsin.
 
+PATH'te `promtool` varsa `plan` ve `apply` üretilen kural dosyalarını ek
+olarak `promtool check rules` ile doğrular ve hata durumunda devam etmez;
+promtool yoksa bu kontrol atlanır.
+
 ### 3. Kimlik bilgileri
 
 Secret'lar asla üretilen dosyalara yazılmaz; docker compose'un `.env`'den
@@ -93,6 +97,33 @@ Grafana: `http://localhost:3000` (`.env`'de `MONUP_GRAFANA_ADMIN_USER` /
 `MONUP_GRAFANA_ADMIN_PASSWORD` ayarlamadıysan admin/admin). Dashboard'lar
 **monup** klasöründe. Prometheus: `http://localhost:9090` (target'lar
 Status → Targets altında, alert kuralları Alerts altında).
+
+### 5. Senkron tutma
+
+Container'lar gelir gider, üretilen dosyalar elle düzenlenir. İki komut
+durumu dürüst tutar:
+
+```console
+$ monup diff
+```
+
+çıktı dizinini güncel plan ile karşılaştırır: her dosya create, update ya
+da stale (diskte duran ama artık üretilmeyen) olarak raporlanır; değişen
+dosyalar için unified diff basılır. Elle yapılan düzenlemeler de aynı
+şekilde görünür, yani drift tespiti olarak da çalışır. Exit code'lar
+`diff(1)` ile aynıdır: 0 fark yok, 1 fark var, 2 hata — script ve cron
+içinde kullanılabilir.
+
+```console
+$ monup watch --auto-apply
+```
+
+Docker'ı poll'lar (varsayılan 30 saniyede bir, `--interval`) ve container
+gelip gittiğinde plan delta'sını, ardından dosya değişikliklerini basar.
+`--auto-apply` ile çıktı dizini her değişiklikte yeniden yazılır; onsuz
+watch yalnızca raporlar. ctrl-c ile durur. Çalışan stack yeni dosyaları
+ancak çıktı dizininde `docker compose up -d` sonrası alır. `watch` `--ai`
+almaz — yeni bilinmeyen bir servis çıkınca `plan --ai`'ı elle çalıştır.
 
 ## Exporter'lar servislerine nasıl ulaşır
 
@@ -126,15 +157,21 @@ Servis notları:
 ## Bayraklar
 
 ```
-monup plan|apply
+monup plan|apply|diff|watch
   --docker-socket path   docker socket (varsayılan: otomatik, $DOCKER_HOST dahil)
   --only a,b             sadece bu katalog girdileri
   --exclude a,b          bu katalog girdilerini atla
   --no-host-scan         host TCP listener taramasını atla (yalnız linux)
 
-monup apply
+monup apply|diff|watch
   --out dir              çıktı dizini (varsayılan "monup")
+
+monup apply
   --start                dosyaları yazdıktan sonra `docker compose up -d`
+
+monup watch
+  --interval dur         poll aralığı (varsayılan 30s)
+  --auto-apply           plan her değiştiğinde dosyaları yaz
 ```
 
 Renkli çıktıyı kapatmak için `NO_COLOR=1`.
@@ -145,11 +182,13 @@ Renkli çıktıyı kapatmak için `NO_COLOR=1`.
 yükseltir:
 
 1. **Custom `/metrics` endpoint'leri** — bilinmeyen bir container publish
-   edilmiş bir portta Prometheus metriği sunuyorsa, monup metrik adlarını
-   okur ve bir LLM'e ona özel Grafana dashboard'u ile alert kuralları
-   ürettirir. Çıktı kullanılmadan önce doğrulanır: biçimi geçerli olmalı
-   ve yalnızca gerçekten var olan metriklere referans verebilir — aksi
-   reddedilir (doğrulama hatasıyla bir kez yeniden denenir, sonra vazgeçilir).
+   edilmiş bir portta Prometheus metriği sunuyorsa (Linux'ta yalnızca
+   network'e bağlı container'lar container IP'si üzerinden de problanır),
+   monup metrik adlarını okur ve bir LLM'e ona özel Grafana dashboard'u
+   ile alert kuralları ürettirir. Çıktı kullanılmadan önce doğrulanır:
+   biçimi geçerli olmalı ve yalnızca gerçekten var olan metriklere
+   referans verebilir — aksi reddedilir (doğrulama hatasıyla bir kez
+   yeniden denenir, sonra vazgeçilir).
 2. **Sınıflandırma** — metriği olmayan container'lar bilinen servis
    tipleriyle karşılaştırılır (örneğin fingerprint'lerin kaçırdığı custom
    build bir postgres imajı). Yalnızca yüksek güvenli cevaplar kabul
