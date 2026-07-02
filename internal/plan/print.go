@@ -7,7 +7,7 @@ import (
 
 // ansi color codes; empty when color is disabled.
 type palette struct {
-	green, yellow, cyan, dim, reset string
+	green, yellow, cyan, red, dim, reset string
 }
 
 func newPalette(color bool) palette {
@@ -18,6 +18,7 @@ func newPalette(color bool) palette {
 		green:  "\x1b[32m",
 		yellow: "\x1b[33m",
 		cyan:   "\x1b[36m",
+		red:    "\x1b[31m",
 		dim:    "\x1b[2m",
 		reset:  "\x1b[0m",
 	}
@@ -40,14 +41,8 @@ func (p *Plan) Print(w io.Writer, files []string, color bool) {
 		case AccessHostGateway:
 			how = fmt.Sprintf("via %s", m.Target)
 		}
-		src := m.Service.Image
-		if m.Service.Source == "host" {
-			src = fmt.Sprintf("host listener :%d", m.Service.Ports[0])
-		} else {
-			src = fmt.Sprintf("container %s (%s)", m.Service.Name, src)
-		}
 		fmt.Fprintf(w, "  %s✓%s %-12s %s %s— %s, matched by %s%s\n",
-			c.green, c.reset, m.Instance, src, c.dim, how, m.Reason, c.reset)
+			c.green, c.reset, m.Instance, sourceDesc(m), c.dim, how, m.Reason, c.reset)
 	}
 	for _, m := range p.Skipped {
 		fmt.Fprintf(w, "  %s!%s %-12s container %s (%s) %s— matched but unreachable, skipped%s\n",
