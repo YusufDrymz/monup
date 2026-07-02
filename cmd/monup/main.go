@@ -31,23 +31,30 @@ Usage:
   monup plan     Discover services and preview what would be generated
   monup apply    Generate the monitoring stack files (see --out)
   monup diff     Compare the output directory with the current plan
+  monup watch    Poll Docker and report plan changes as containers come and go
   monup catalog  List built-in service definitions
   monup version  Print version
 
-Flags (plan, apply and diff):
+Flags (plan, apply, diff and watch):
   --docker-socket path   Docker socket (default: auto-detect)
   --no-host-scan         Skip host TCP listener scan (linux only)
   --only a,b             Only include these catalog entries
   --exclude a,b          Exclude these catalog entries
+
+Flags (plan, apply and diff):
   --ai                   Use an LLM to classify unknown services and generate
                          dashboards from custom /metrics endpoints
                          (needs ANTHROPIC_API_KEY, OPENAI_API_KEY or OLLAMA_HOST)
 
-Flags (apply and diff):
+Flags (apply, diff and watch):
   --out dir              Output directory (default "monup")
 
 Flags (apply):
   --start                Run 'docker compose up -d' after writing files
+
+Flags (watch):
+  --interval dur         Poll interval (default 30s)
+  --auto-apply           Write files whenever the plan changes
 
 Exit codes (diff): 0 no differences, 1 differences found, 2 error.
 `
@@ -69,6 +76,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdApply(rest, stdout, stderr)
 	case "diff":
 		return cmdDiff(rest, stdout, stderr)
+	case "watch":
+		return cmdWatch(rest, stdout, stderr)
 	case "catalog":
 		return cmdCatalog(stdout, stderr)
 	case "version":
@@ -139,36 +148,42 @@ func buildPlan(cf *commonFlags, stderr io.Writer) (*plan.Plan, *catalog.Catalog,
 		}
 	}
 
-	var hostPorts []int
-	if !cf.noHostScan {
-		ports, err := discover.ListeningPorts()
-		switch {
-		case err == nil:
-			// Ports already published by containers belong to those
-			// containers, not to host services.
-			published := map[int]bool{}
-			for _, svc := range services {
-				for _, hp := range svc.Published {
-					published[hp] = true
-				}
-			}
-			for _, p := range ports {
-				if !published[p] {
-					hostPorts = append(hostPorts, p)
-				}
-			}
-		case errors.Is(err, discover.ErrHostScanUnsupported):
-			// Expected off-linux; stay quiet.
-		default:
-			fmt.Fprintf(stderr, "note: host port scan failed: %v\n", err)
-		}
-	}
-
 	cat, err := catalog.Load()
 	if err != nil {
 		return nil, nil, err
 	}
-	return plan.Build(services, hostPorts, cat, cf.planOptions()), cat, nil
+	return plan.Build(services, scanHostPorts(cf, services, stderr), cat, cf.planOptions()), cat, nil
+}
+
+// scanHostPorts returns non-loopback host listeners, minus ports already
+// published by discovered containers (those belong to the containers,
+// not to host services).
+func scanHostPorts(cf *commonFlags, services []discover.Service, stderr io.Writer) []int {
+	if cf.noHostScan {
+		return nil
+	}
+	ports, err := discover.ListeningPorts()
+	switch {
+	case errors.Is(err, discover.ErrHostScanUnsupported):
+		// Expected off-linux; stay quiet.
+		return nil
+	case err != nil:
+		fmt.Fprintf(stderr, "note: host port scan failed: %v\n", err)
+		return nil
+	}
+	published := map[int]bool{}
+	for _, svc := range services {
+		for _, hp := range svc.Published {
+			published[hp] = true
+		}
+	}
+	var hostPorts []int
+	for _, p := range ports {
+		if !published[p] {
+			hostPorts = append(hostPorts, p)
+		}
+	}
+	return hostPorts
 }
 
 // runAI applies the optional AI enrichment step to a built plan.
@@ -244,15 +259,10 @@ func cmdApply(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// A missing .env would make credential-based exporters crash-loop;
-	// seed it from the example so the stack comes up.
 	envPath := filepath.Join(*out, ".env")
-	if _, err := os.Stat(envPath); os.IsNotExist(err) {
-		if err := os.WriteFile(envPath, files[".env.example"], 0o600); err != nil {
-			fmt.Fprintf(stderr, "error: seed .env: %v\n", err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "\nSeeded %s from .env.example — fill in the empty values.\n", envPath)
+	if err := seedEnv(*out, files, stdout); err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
 	}
 
 	if *start {
@@ -271,6 +281,22 @@ func cmdApply(args []string, stdout, stderr io.Writer) int {
 			*out, envPath, filepath.Join(*out, "docker-compose.yml"))
 	}
 	return 0
+}
+
+// seedEnv writes .env from .env.example on the first apply; a missing
+// .env would make credential-based exporters crash-loop.
+func seedEnv(outDir string, files map[string][]byte, stdout io.Writer) error {
+	envPath := filepath.Join(outDir, ".env")
+	if _, err := os.Stat(envPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.WriteFile(envPath, files[".env.example"], 0o600); err != nil {
+		return fmt.Errorf("seed .env: %w", err)
+	}
+	fmt.Fprintf(stdout, "\nSeeded %s from .env.example — fill in the empty values.\n", envPath)
+	return nil
 }
 
 // writeFiles writes the rendered tree, reporting per-file status.
