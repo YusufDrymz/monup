@@ -30,10 +30,11 @@ const usage = `monup — terraform-plan for monitoring
 Usage:
   monup plan     Discover services and preview what would be generated
   monup apply    Generate the monitoring stack files (see --out)
+  monup diff     Compare the output directory with the current plan
   monup catalog  List built-in service definitions
   monup version  Print version
 
-Flags (plan and apply):
+Flags (plan, apply and diff):
   --docker-socket path   Docker socket (default: auto-detect)
   --no-host-scan         Skip host TCP listener scan (linux only)
   --only a,b             Only include these catalog entries
@@ -42,9 +43,13 @@ Flags (plan and apply):
                          dashboards from custom /metrics endpoints
                          (needs ANTHROPIC_API_KEY, OPENAI_API_KEY or OLLAMA_HOST)
 
-Flags (apply):
+Flags (apply and diff):
   --out dir              Output directory (default "monup")
+
+Flags (apply):
   --start                Run 'docker compose up -d' after writing files
+
+Exit codes (diff): 0 no differences, 1 differences found, 2 error.
 `
 
 func main() {
@@ -62,6 +67,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdPlan(rest, stdout, stderr)
 	case "apply":
 		return cmdApply(rest, stdout, stderr)
+	case "diff":
+		return cmdDiff(rest, stdout, stderr)
 	case "catalog":
 		return cmdCatalog(stdout, stderr)
 	case "version":

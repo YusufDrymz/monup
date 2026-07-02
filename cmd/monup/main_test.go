@@ -105,6 +105,64 @@ func TestApplyWritesFiles(t *testing.T) {
 	}
 }
 
+func TestDiffCommand(t *testing.T) {
+	sock := startFakeDocker(t)
+	out := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	// Nothing applied yet: everything is a pending create.
+	code := run([]string{"diff", "--docker-socket", sock, "--no-host-scan", "--out", out}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("diff on empty dir exited %d, want 1; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "0 to update") || !strings.Contains(stdout.String(), "0 unchanged") {
+		t.Errorf("unexpected diff summary:\n%s", stdout.String())
+	}
+
+	if code := run([]string{"apply", "--docker-socket", sock, "--no-host-scan", "--out", out}, &stdout, &stderr); code != 0 {
+		t.Fatalf("apply exited %d", code)
+	}
+
+	// Freshly applied: no differences.
+	stdout.Reset()
+	code = run([]string{"diff", "--docker-socket", sock, "--no-host-scan", "--out", out}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("diff after apply exited %d, want 0\n%s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "0 to create, 0 to update") {
+		t.Errorf("unexpected diff summary:\n%s", stdout.String())
+	}
+
+	// Hand-edit one file, drop a stale one in an owned dir.
+	promPath := filepath.Join(out, "prometheus", "prometheus.yml")
+	orig, err := os.ReadFile(promPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(promPath, append(orig, "# local tweak\n"...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "prometheus", "rules", "old.yml"), []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	code = run([]string{"diff", "--docker-socket", sock, "--no-host-scan", "--out", out}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("diff with drift exited %d, want 1", code)
+	}
+	for _, want := range []string{
+		"~ prometheus/prometheus.yml",
+		"-# local tweak",
+		"prometheus/rules/old.yml",
+		"1 stale",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("diff output missing %q\noutput:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestCatalogCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"catalog"}, &stdout, &stderr); code != 0 {
