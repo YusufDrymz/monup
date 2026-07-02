@@ -184,9 +184,35 @@ func resolveScrapeTarget(svc discover.Service, metricsPort int, access AccessKin
 
 var slugRe = regexp.MustCompile(`[^a-z0-9-]+`)
 
-func slug(s string) string {
+// Slug normalizes a container name for use in generated identifiers.
+func Slug(s string) string {
 	s = slugRe.ReplaceAllString(strings.ToLower(s), "-")
 	return strings.Trim(s, "-")
+}
+
+// Bind matches a service to a catalog entry outside the normal catalog
+// matching path (used for AI-generated and AI-classified entries),
+// applying the same access and scrape-target resolution as Build.
+// port is the service-side port the recipe targets. The returned warning
+// is non-empty when the service is unreachable and ok is false.
+func Bind(svc discover.Service, e catalog.Entry, port int, reason catalog.MatchReason) (Match, string, bool) {
+	m := Match{Service: svc, Entry: e, Reason: reason, Instance: e.Name}
+	m.Access, m.Network, m.Target = resolveAccess(svc, port)
+	if m.Access == AccessNone {
+		return m, fmt.Sprintf(
+			"%s (%s): no user-defined network and no published port; skipped",
+			svc.Name, svc.Image), false
+	}
+	if e.Exporter == nil {
+		st, ok := resolveScrapeTarget(svc, e.Scrape.Port, m.Access)
+		if !ok {
+			return m, fmt.Sprintf(
+				"%s (%s): metrics port %d is not reachable (not published); skipped",
+				svc.Name, svc.Image, e.Scrape.Port), false
+		}
+		m.ScrapeTarget = st
+	}
+	return m, "", true
 }
 
 // disambiguate suffixes Instance names with the container name when
@@ -200,7 +226,7 @@ func disambiguate(matches []Match) {
 	for i := range matches {
 		m := &matches[i]
 		if count[m.Entry.Name] > 1 {
-			m.Instance = m.Entry.Name + "-" + slug(m.Service.Name)
+			m.Instance = m.Entry.Name + "-" + Slug(m.Service.Name)
 		}
 		// Guarantee uniqueness even for identical container names.
 		base := m.Instance

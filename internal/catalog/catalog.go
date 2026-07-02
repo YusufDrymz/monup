@@ -106,7 +106,7 @@ func Load() (*Catalog, error) {
 		if err := yaml.Unmarshal(data, &e); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", f.Name(), err)
 		}
-		if err := e.validate(); err != nil {
+		if err := e.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid catalog entry %s: %w", f.Name(), err)
 		}
 		entries = append(entries, e)
@@ -115,7 +115,10 @@ func Load() (*Catalog, error) {
 	return &Catalog{Entries: entries}, nil
 }
 
-func (e Entry) validate() error {
+// Validate checks structural invariants; used for builtin entries at
+// load time and for dynamically generated (AI) entries before they
+// enter a plan.
+func (e Entry) Validate() error {
 	if e.Name == "" {
 		return fmt.Errorf("name is required")
 	}
