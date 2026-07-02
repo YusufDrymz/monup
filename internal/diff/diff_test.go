@@ -3,6 +3,7 @@ package diff
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -114,6 +115,33 @@ func TestDir(t *testing.T) {
 		if f.Path == "prometheus/prometheus.yml" && !strings.Contains(f.Diff, "-edited by hand") {
 			t.Errorf("update diff missing removed line:\n%s", f.Diff)
 		}
+	}
+}
+
+func TestMaps(t *testing.T) {
+	old := map[string][]byte{
+		"same.yml":    []byte("a\n"),
+		"changed.yml": []byte("a\n"),
+		"removed.yml": []byte("a\n"),
+	}
+	cur := map[string][]byte{
+		"same.yml":    []byte("a\n"),
+		"changed.yml": []byte("b\n"),
+		"new.yml":     []byte("a\n"),
+	}
+	files := Maps(old, cur)
+	got := map[string]Status{}
+	for _, f := range files {
+		got[f.Path] = f.Status
+	}
+	want := map[string]Status{
+		"same.yml":    Unchanged,
+		"changed.yml": Update,
+		"new.yml":     Create,
+		"removed.yml": Stale,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Maps() = %v, want %v", got, want)
 	}
 }
 

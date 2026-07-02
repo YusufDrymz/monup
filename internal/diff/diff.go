@@ -79,6 +79,42 @@ func Dir(outDir string, rendered map[string][]byte) ([]File, error) {
 	return out, nil
 }
 
+// Maps compares two rendered trees in memory (old → new), without
+// touching disk. Paths only in old come back Stale, mirroring what an
+// apply after the change would leave behind on disk.
+func Maps(old, cur map[string][]byte) []File {
+	paths := make([]string, 0, len(cur))
+	for p := range cur {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var out []File
+	for _, path := range paths {
+		prev, ok := old[path]
+		switch {
+		case !ok:
+			out = append(out, File{Path: path, Status: Create})
+		case string(prev) == string(cur[path]):
+			out = append(out, File{Path: path, Status: Unchanged})
+		default:
+			out = append(out, File{Path: path, Status: Update, Diff: Lines(prev, cur[path])})
+		}
+	}
+
+	var removed []string
+	for path := range old {
+		if _, ok := cur[path]; !ok {
+			removed = append(removed, path)
+		}
+	}
+	sort.Strings(removed)
+	for _, path := range removed {
+		out = append(out, File{Path: path, Status: Stale})
+	}
+	return out
+}
+
 // Changed reports whether any file differs from the plan.
 func Changed(files []File) bool {
 	for _, f := range files {
