@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -60,7 +61,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "catalog":
 		return cmdCatalog(stdout, stderr)
 	case "version":
-		fmt.Fprintf(stdout, "monup %s\n", version)
+		fmt.Fprintf(stdout, "monup %s\n", buildVersion())
 		return 0
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
@@ -293,6 +294,18 @@ func cmdCatalog(stdout, stderr io.Writer) int {
 			e.Name, match, how, len(e.Alerts), panels)
 	}
 	return 0
+}
+
+// buildVersion prefers the ldflags value, falling back to the module
+// version stamped by `go install pkg@version`.
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return version
 }
 
 func colorEnabled() bool {
