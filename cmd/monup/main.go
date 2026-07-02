@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YusufDrymz/monup/internal/ai"
 	"github.com/YusufDrymz/monup/internal/catalog"
 	"github.com/YusufDrymz/monup/internal/discover"
 	"github.com/YusufDrymz/monup/internal/plan"
@@ -37,6 +38,9 @@ Flags (plan and apply):
   --no-host-scan         Skip host TCP listener scan (linux only)
   --only a,b             Only include these catalog entries
   --exclude a,b          Exclude these catalog entries
+  --ai                   Use an LLM to classify unknown services and generate
+                         dashboards from custom /metrics endpoints
+                         (needs ANTHROPIC_API_KEY, OPENAI_API_KEY or OLLAMA_HOST)
 
 Flags (apply):
   --out dir              Output directory (default "monup")
@@ -78,6 +82,7 @@ type commonFlags struct {
 	noHostScan   bool
 	only         string
 	exclude      string
+	ai           bool
 }
 
 func (c *commonFlags) register(fs *flag.FlagSet) {
@@ -85,6 +90,7 @@ func (c *commonFlags) register(fs *flag.FlagSet) {
 	fs.BoolVar(&c.noHostScan, "no-host-scan", false, "skip host TCP listener scan")
 	fs.StringVar(&c.only, "only", "", "comma-separated catalog entries to include")
 	fs.StringVar(&c.exclude, "exclude", "", "comma-separated catalog entries to exclude")
+	fs.BoolVar(&c.ai, "ai", false, "classify unknown services and generate dashboards with an LLM")
 }
 
 func (c *commonFlags) planOptions() plan.Options {
@@ -107,7 +113,7 @@ func splitList(s string) []string {
 
 // buildPlan runs discovery and matching; notes are non-fatal findings
 // (missing docker socket, unsupported host scan) surfaced to the user.
-func buildPlan(cf *commonFlags, stderr io.Writer) (*plan.Plan, error) {
+func buildPlan(cf *commonFlags, stderr io.Writer) (*plan.Plan, *catalog.Catalog, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -153,9 +159,22 @@ func buildPlan(cf *commonFlags, stderr io.Writer) (*plan.Plan, error) {
 
 	cat, err := catalog.Load()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return plan.Build(services, hostPorts, cat, cf.planOptions()), nil
+	return plan.Build(services, hostPorts, cat, cf.planOptions()), cat, nil
+}
+
+// runAI applies the optional AI enrichment step to a built plan.
+func runAI(p *plan.Plan, cat *catalog.Catalog, stdout, stderr io.Writer) int {
+	client, err := ai.New()
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	aiEnrich(ctx, p, cat, client, stdout)
+	return 0
 }
 
 func cmdPlan(args []string, stdout, stderr io.Writer) int {
@@ -166,10 +185,15 @@ func cmdPlan(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	p, err := buildPlan(&cf, stderr)
+	p, cat, err := buildPlan(&cf, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
+	}
+	if cf.ai {
+		if code := runAI(p, cat, stdout, stderr); code != 0 {
+			return code
+		}
 	}
 	files, err := render.Files(p)
 	if err != nil {
@@ -191,10 +215,15 @@ func cmdApply(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	p, err := buildPlan(&cf, stderr)
+	p, cat, err := buildPlan(&cf, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
+	}
+	if cf.ai {
+		if code := runAI(p, cat, stdout, stderr); code != 0 {
+			return code
+		}
 	}
 	files, err := render.Files(p)
 	if err != nil {
