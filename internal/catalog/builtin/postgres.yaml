@@ -1,0 +1,37 @@
+name: postgres
+match:
+  images: ["postgres", "postgresql", "bitnami/postgresql", "timescale/timescaledb", "pgvector/pgvector"]
+  ports: [5432]
+exporter:
+  image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+  port: 9187
+  env:
+    DATA_SOURCE_NAME: "postgresql://${MONUP_PG_USER}:${MONUP_PG_PASSWORD}@{{target}}/postgres?sslmode=disable"
+alerts:
+  - alert: PostgresDown
+    expr: pg_up == 0
+    for: 1m
+    labels: {severity: critical}
+    annotations:
+      summary: "PostgreSQL instance {{ $labels.instance }} is down"
+  - alert: PostgresTooManyConnections
+    expr: sum by (instance) (pg_stat_activity_count) > 0.8 * min by (instance) (pg_settings_max_connections)
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "PostgreSQL {{ $labels.instance }} is using more than 80% of max_connections"
+  - alert: PostgresLowCacheHitRatio
+    expr: sum by (instance) (rate(pg_stat_database_blks_hit[5m])) / (sum by (instance) (rate(pg_stat_database_blks_hit[5m])) + sum by (instance) (rate(pg_stat_database_blks_read[5m]))) < 0.90
+    for: 15m
+    labels: {severity: warning}
+    annotations:
+      summary: "PostgreSQL {{ $labels.instance }} cache hit ratio below 90%"
+dashboard:
+  title: PostgreSQL
+  panels:
+    - {title: "Up", expr: "pg_up", type: stat}
+    - {title: "Active connections", expr: "sum(pg_stat_activity_count)"}
+    - {title: "Transactions/s (commit + rollback)", expr: "sum(rate(pg_stat_database_xact_commit[5m])) + sum(rate(pg_stat_database_xact_rollback[5m]))", unit: ops}
+    - {title: "Cache hit ratio", expr: "sum(rate(pg_stat_database_blks_hit[5m])) / (sum(rate(pg_stat_database_blks_hit[5m])) + sum(rate(pg_stat_database_blks_read[5m])))", unit: percentunit}
+    - {title: "Database size", expr: "sum by (datname) (pg_database_size_bytes)", unit: bytes}
+    - {title: "Rows fetched/s", expr: "sum(rate(pg_stat_database_tup_fetched[5m]))", unit: ops}

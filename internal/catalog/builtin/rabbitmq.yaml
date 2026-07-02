@@ -1,0 +1,31 @@
+# RabbitMQ 3.8+ ships a built-in Prometheus plugin on port 15692
+# (rabbitmq_prometheus). No sidecar exporter needed; the target is
+# scraped directly. The plugin must be enabled:
+#   rabbitmq-plugins enable rabbitmq_prometheus
+name: rabbitmq
+match:
+  images: ["rabbitmq", "bitnami/rabbitmq"]
+  ports: [5672]
+scrape:
+  port: 15692
+alerts:
+  - alert: RabbitmqDown
+    expr: up{job="rabbitmq"} == 0
+    for: 1m
+    labels: {severity: critical}
+    annotations:
+      summary: "RabbitMQ instance {{ $labels.instance }} is down (or rabbitmq_prometheus plugin is not enabled)"
+  - alert: RabbitmqHighMemory
+    expr: rabbitmq_process_resident_memory_bytes / rabbitmq_resident_memory_limit_bytes > 0.9
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "RabbitMQ {{ $labels.instance }} memory usage above 90% of its limit"
+dashboard:
+  title: RabbitMQ
+  panels:
+    - {title: "Up", expr: "up{job=\"rabbitmq\"}", type: stat}
+    - {title: "Queues", expr: "rabbitmq_queues"}
+    - {title: "Messages ready", expr: "rabbitmq_queue_messages_ready"}
+    - {title: "Messages published/s", expr: "rate(rabbitmq_global_messages_received_total[5m])", unit: ops}
+    - {title: "Resident memory", expr: "rabbitmq_process_resident_memory_bytes", unit: bytes}

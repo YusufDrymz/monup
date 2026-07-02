@@ -1,0 +1,29 @@
+name: nginx
+match:
+  images: ["nginx", "bitnami/nginx", "openresty/openresty"]
+  ports: [80, 443]
+exporter:
+  image: nginx/nginx-prometheus-exporter:1.3.0
+  port: 9113
+  args:
+    - "--nginx.scrape-uri=http://{{target}}/stub_status"
+alerts:
+  - alert: NginxDown
+    expr: nginx_up == 0
+    for: 1m
+    labels: {severity: critical}
+    annotations:
+      summary: "nginx instance {{ $labels.instance }} is down (or stub_status is not enabled)"
+  - alert: NginxHighConnectionChurn
+    expr: rate(nginx_connections_accepted[5m]) - rate(nginx_connections_handled[5m]) > 0
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "nginx {{ $labels.instance }} is dropping connections (accepted > handled)"
+dashboard:
+  title: nginx
+  panels:
+    - {title: "Up", expr: "nginx_up", type: stat}
+    - {title: "Requests/s", expr: "rate(nginx_http_requests_total[5m])", unit: reqps}
+    - {title: "Active connections", expr: "nginx_connections_active"}
+    - {title: "Connections accepted/s", expr: "rate(nginx_connections_accepted[5m])", unit: ops}

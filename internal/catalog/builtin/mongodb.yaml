@@ -1,0 +1,29 @@
+name: mongodb
+match:
+  images: ["mongo", "mongodb", "bitnami/mongodb", "mongodb/mongodb-community-server"]
+  ports: [27017]
+exporter:
+  image: percona/mongodb_exporter:0.40
+  port: 9216
+  env:
+    MONGODB_URI: "mongodb://{{target}}"
+alerts:
+  - alert: MongodbDown
+    expr: mongodb_up == 0
+    for: 1m
+    labels: {severity: critical}
+    annotations:
+      summary: "MongoDB instance {{ $labels.instance }} is down"
+  - alert: MongodbTooManyConnections
+    expr: mongodb_ss_connections{conn_type="current"} > 0.8 * (mongodb_ss_connections{conn_type="current"} + mongodb_ss_connections{conn_type="available"})
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "MongoDB {{ $labels.instance }} is using more than 80% of available connections"
+dashboard:
+  title: MongoDB
+  panels:
+    - {title: "Up", expr: "mongodb_up", type: stat}
+    - {title: "Current connections", expr: "mongodb_ss_connections{conn_type=\"current\"}"}
+    - {title: "Operations/s", expr: "sum by (legacy_op_type) (rate(mongodb_ss_opcounters[5m]))", unit: ops}
+    - {title: "Resident memory", expr: "mongodb_ss_mem_resident * 1024 * 1024", unit: bytes}

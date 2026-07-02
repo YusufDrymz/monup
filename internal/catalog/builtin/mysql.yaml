@@ -1,0 +1,40 @@
+name: mysql
+match:
+  images: ["mysql", "mariadb", "bitnami/mysql", "bitnami/mariadb", "percona"]
+  ports: [3306]
+exporter:
+  image: prom/mysqld-exporter:v0.15.1
+  port: 9104
+  args:
+    - "--mysqld.address={{target}}"
+    - "--mysqld.username=${MONUP_MYSQL_USER}"
+  env:
+    MYSQLD_EXPORTER_PASSWORD: "${MONUP_MYSQL_PASSWORD}"
+alerts:
+  - alert: MysqlDown
+    expr: mysql_up == 0
+    for: 1m
+    labels: {severity: critical}
+    annotations:
+      summary: "MySQL instance {{ $labels.instance }} is down"
+  - alert: MysqlTooManyConnections
+    expr: mysql_global_status_threads_connected > 0.8 * mysql_global_variables_max_connections
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "MySQL {{ $labels.instance }} is using more than 80% of max_connections"
+  - alert: MysqlSlowQueries
+    expr: rate(mysql_global_status_slow_queries[5m]) > 0.2
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "MySQL {{ $labels.instance }} slow query rate is elevated"
+dashboard:
+  title: MySQL
+  panels:
+    - {title: "Up", expr: "mysql_up", type: stat}
+    - {title: "Threads connected", expr: "mysql_global_status_threads_connected"}
+    - {title: "Queries/s", expr: "rate(mysql_global_status_queries[5m])", unit: ops}
+    - {title: "Slow queries/s", expr: "rate(mysql_global_status_slow_queries[5m])", unit: ops}
+    - {title: "Network in/out", expr: "rate(mysql_global_status_bytes_received[5m])", unit: Bps}
+    - {title: "InnoDB buffer pool usage", expr: "mysql_global_status_innodb_buffer_pool_bytes_data", unit: bytes}

@@ -1,0 +1,35 @@
+# Host metrics via node_exporter. Included in every plan (always: true);
+# the node-exporter container itself is part of the core stack that the
+# plan/render layers add unconditionally.
+name: node
+always: true
+scrape:
+  job_name: node
+alerts:
+  - alert: HostHighCpuUsage
+    expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+    for: 10m
+    labels: {severity: warning}
+    annotations:
+      summary: "Host {{ $labels.instance }} CPU usage above 90%"
+  - alert: HostOutOfMemory
+    expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+    for: 5m
+    labels: {severity: warning}
+    annotations:
+      summary: "Host {{ $labels.instance }} has less than 10% memory available"
+  - alert: HostDiskAlmostFull
+    expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"} < 0.10
+    for: 5m
+    labels: {severity: critical}
+    annotations:
+      summary: "Host {{ $labels.instance }} filesystem {{ $labels.mountpoint }} has less than 10% space left"
+dashboard:
+  title: Host
+  panels:
+    - {title: "CPU usage", expr: "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", unit: percent}
+    - {title: "Memory available", expr: "node_memory_MemAvailable_bytes", unit: bytes}
+    - {title: "Disk space available", expr: "node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"}", unit: bytes}
+    - {title: "Load average (1m)", expr: "node_load1"}
+    - {title: "Network received", expr: "sum(rate(node_network_receive_bytes_total{device!=\"lo\"}[5m]))", unit: Bps}
+    - {title: "Network transmitted", expr: "sum(rate(node_network_transmit_bytes_total{device!=\"lo\"}[5m]))", unit: Bps}
